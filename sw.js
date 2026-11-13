@@ -1,4 +1,4 @@
-const CACHE='home-pantry-static-v3';
+const CACHE='home-pantry-static-v5';
 const ASSETS=['./','./index.html','./styles.css','./app.js','./db.js','./expiry-rules.js','./cloud.js','./cloud-config.js','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png'];
 self.addEventListener('install',event=>{
  // New worker waits until the user chooses "Обновить сейчас".
