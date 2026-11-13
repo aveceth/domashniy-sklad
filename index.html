@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f4f5ef">
+  <meta name="description" content="Домашний продуктовый склад — учёт продуктов, сроков годности и расходов.">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+  <title>Домашний продуктовый склад</title>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Основная навигация">
+      <div class="brand"><div class="brand-symbol">▦</div><div><strong>Домашний<br>продуктовый склад</strong><small>Уютный порядок в запасах</small></div></div>
+      <nav class="side-nav" id="sideNav">
+        <button data-page="dashboard" class="nav-item active"><span>◫</span> Обзор</button>
+        <button data-page="stock" class="nav-item"><span>▤</span> Все продукты</button>
+        <button data-page="purchases" class="nav-item"><span>◷</span> Покупки и расходы</button>
+        <button data-page="shopping" class="nav-item"><span>☷</span> Список покупок</button>
+        <button data-page="settings" class="nav-item"><span>⚙</span> Настройки</button>
+      </nav>
+      <div class="sidebar-foot"><div class="foot-dot"></div> Данные хранятся на устройстве <span id="installHint"></span></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div><div class="eyebrow">МОЯ КУХНЯ / <span id="crumb">ОБЗОР</span></div><h1 id="pageTitle">Всё под контролем</h1><p class="subtitle" id="pageSubtitle">Ваши продукты и их свежесть — в одном месте.</p></div><div class="top-actions"><button id="installBtn" class="btn btn-light hidden">Установить приложение</button><button id="addBtn" class="btn btn-primary"><span>＋</span> Добавить продукт</button></div></header>
+      <div id="appContent"></div>
+    </main>
+  </div>
+  <nav class="bottom-nav" id="bottomNav" aria-label="Навигация на телефоне"><button data-page="dashboard" class="active"><span>◫</span>Обзор</button><button data-page="stock"><span>▤</span>Запасы</button><button data-page="purchases"><span>◷</span>Расходы</button><button data-page="shopping"><span>☷</span>Список</button><button data-page="settings"><span>⚙</span>Ещё</button></nav>
+
+  <dialog id="productDialog" class="dialog"><form id="productForm" class="dialog-card"><div class="dialog-heading"><div><div class="eyebrow">КАРТОЧКА ПРОДУКТА</div><h2 id="dialogTitle">Добавить продукт</h2></div><button type="button" id="closeDialog" class="icon-btn" aria-label="Закрыть">✕</button></div><div class="form-grid"><label class="field wide">Название продукта<input name="name" id="productName" required maxlength="100" placeholder="Например, молоко 2,5%"></label><label class="field">Место хранения<select name="location" id="productLocation"><option value="fridge">Холодильник</option><option value="freezer">Морозилка</option><option value="pantry">Кухонный шкаф</option></select></label><label class="field">Категория<select name="category" id="productCategory"><option value="dairy">Молочные продукты</option><option value="vegetables">Овощи</option><option value="fruit">Фрукты</option><option value="greens">Зелень</option><option value="meat">Мясо и птица</option><option value="fish">Рыба</option><option value="eggs">Яйца</option><option value="grains">Крупы и макароны</option><option value="canned">Консервы</option><option value="prepared">Готовые блюда</option><option value="other">Другое</option></select></label><label class="field">Количество<input name="quantity" type="number" id="productQuantity" step="any" min="0.001" required value="1"></label><label class="field">Единица<select name="unit" id="productUnit"><option value="шт">шт</option><option value="уп">уп</option><option value="г">г</option><option value="кг">кг</option><option value="мл">мл</option><option value="л">л</option></select></label><label class="field">Дата покупки<input name="purchaseDate" type="date" id="productPurchaseDate" required></label><label class="field">Использовать до<input name="expiryDate" type="date" id="productExpiryDate"></label><div class="form-tip wide"><label class="checkline"><input type="checkbox" id="autoExpiry" checked> Рассчитать ориентировочный срок автоматически, если дата неизвестна</label><small id="expiryHint">Ориентир зависит от категории и места хранения. Для упаковки используйте её этикетку.</small></div><label class="field wide">Стоимость этой покупки, ₽ <input name="totalPrice" id="productTotalPrice" min="0" step="0.01" type="number" placeholder="Например, 169.90"></label><div class="field wide"><label class="file-label" for="productPhoto">📷 Добавить фото продукта или упаковки <span>С камеры или из галереи</span></label><input id="productPhoto" type="file" accept="image/*" capture="environment" class="visually-hidden"><div id="photoPreview" class="photo-preview hidden"></div><p class="helper" id="photoNotice">Можно прикрепить фото. Если на нём есть штрихкод, попробуем найти товар в открытом каталоге.</p></div></div><div class="dialog-actions"><button id="deleteProduct" type="button" class="btn btn-danger-outline hidden">Удалить партию</button><div class="dialog-spacer"></div><button type="button" class="btn btn-light" id="cancelProduct">Отмена</button><button type="submit" class="btn btn-primary">Сохранить</button></div></form></dialog>
+
+  <dialog id="confirmDialog" class="dialog small-dialog"><div class="dialog-card"><h2 id="confirmTitle">Подтверждение</h2><p id="confirmText"></p><div class="dialog-actions"><div class="dialog-spacer"></div><button id="confirmNo" class="btn btn-light">Отмена</button><button id="confirmYes" class="btn btn-danger">Удалить</button></div></div></dialog>
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
