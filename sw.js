@@ -1,23 +1,131 @@
-const CACHE='home-pantry-static-v5';
-const ASSETS=['./','./index.html','./styles.css','./app.js','./db.js','./expiry-rules.js','./cloud.js','./cloud-config.js','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png'];
-self.addEventListener('install',event=>{
- // New worker waits until the user chooses "Обновить сейчас".
- event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)));
+const CACHE = 'home-pantry-static-v6';
+
+const ASSETS = [
+  './',
+  './index.html',
+  './styles.css',
+  './app.js',
+  './db.js',
+  './expiry-rules.js',
+  './cloud.js',
+  './cloud-config.js',
+  './manifest.webmanifest',
+  './icons/icon-192.png',
+  './icons/icon-512.png'
+];
+
+// Устанавливаем новые файлы и активируем обновление.
+self.addEventListener('install', event => {
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    await cache.addAll(ASSETS);
+    await self.skipWaiting();
+  })());
 });
-self.addEventListener('message',event=>{if(event.data?.type==='SKIP_WAITING')self.skipWaiting()});
-self.addEventListener('activate',event=>{
- event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('home-pantry-static-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));
+
+// Удаляем устаревший кеш.
+self.addEventListener('activate', event => {
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+
+    await Promise.all(
+      keys
+        .filter(key =>
+          key.startsWith('home-pantry-static-') &&
+          key !== CACHE
+        )
+        .map(key => caches.delete(key))
+    );
+
+    await self.clients.claim();
+  })());
 });
-self.addEventListener('fetch',event=>{
- const req=event.request;if(req.method!=='GET')return;
- const url=new URL(req.url);if(url.origin!==self.location.origin)return;
- event.respondWith(caches.match(req).then(cached=>cached||fetch(req)));
+
+// При наличии интернета получаем свежие файлы.
+// При отсутствии интернета используем кеш.
+self.addEventListener('fetch', event => {
+  const request = event.request;
+
+  if (request.method !== 'GET') return;
+
+  const url = new URL(request.url);
+
+  if (url.origin !== self.location.origin) return;
+
+  event.respondWith((async () => {
+    try {
+      const response = await fetch(request, {
+        cache: 'no-store'
+      });
+
+      if (response.ok) {
+        const cache = await caches.open(CACHE);
+        await cache.put(request, response.clone());
+      }
+
+      return response;
+    } catch (error) {
+      const cached = await caches.match(request);
+      if (cached) return cached;
+
+      if (request.mode === 'navigate') {
+        const fallback = await caches.match('./index.html');
+        if (fallback) return fallback;
+      }
+
+      return Response.error();
+    }
+  })());
 });
-self.addEventListener('push',event=>{
- let payload={title:'Домашний склад',body:'Проверьте продукты, срок которых заканчивается.'};
- try{payload={...payload,...(event.data?.json()||{})}}catch{}
- event.waitUntil(self.registration.showNotification(payload.title,{body:payload.body,icon:'./icons/icon-192.png',badge:'./icons/icon-192.png',tag:payload.tag||'pantry-expiry',data:{url:'./'}}));
+
+// Совместимость с кнопкой обновления.
+self.addEventListener('message', event => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
-self.addEventListener('notificationclick',event=>{
- event.notification.close();event.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(list=>list.length?list[0].focus():clients.openWindow(event.notification.data?.url||'./')));
+
+// Получение фоновых push-уведомлений.
+self.addEventListener('push', event => {
+  let payload = {
+    title: 'Домашний склад',
+    body: 'Проверьте сроки хранения продуктов.'
+  };
+
+  try {
+    payload = {
+      ...payload,
+      ...(event.data?.json() || {})
+    };
+  } catch (error) {}
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: './icons/icon-192.png',
+      badge: './icons/icon-192.png',
+      tag: payload.tag || 'pantry-expiry',
+      data: { url: './' }
+    })
+  );
+});
+
+// Открытие приложения по нажатию на уведомление.
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+
+  event.waitUntil(
+    clients.matchAll({
+      type: 'window',
+      includeUncontrolled: true
+    }).then(windows => {
+      if (windows.length) {
+        return windows[0].focus();
+      }
+
+      return clients.openWindow(
+        event.notification.data?.url || './'
+      );
+    })
+  );
 });
