@@ -1,7 +1,11 @@
 import {SUPABASE_URL,SUPABASE_ANON_KEY} from './cloud-config.js';
 const KEY='home-pantry-cloud-auth-v1';
 export const cloudConfigured=()=>Boolean(SUPABASE_URL&&SUPABASE_ANON_KEY);
-function endpoint(path){return SUPABASE_URL.replace(/\/$/,'')+path}
+
+function endpoint(path) {
+  return SUPABASE_URL.replace(/\/+$/, '') + path;
+}
+
 function session(){try{return JSON.parse(localStorage.getItem(KEY)||'null')}catch{return null}}
 export const signedIn=()=>Boolean(session()?.refresh_token);
 export function signOut(){localStorage.removeItem(KEY)}

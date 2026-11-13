@@ -1,0 +1,5 @@
+cli-latest-supabase_temp
+supabase/.temp/
+node_modules/
+.env
+.env.*
