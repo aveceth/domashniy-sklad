@@ -1,4 +1,4 @@
-const CACHE = 'home-pantry-static-v6';
+const CACHE = 'home-pantry-static-v041';
 
 const ASSETS = [
   './',
@@ -9,6 +9,7 @@ const ASSETS = [
   './expiry-rules.js',
   './cloud.js',
   './cloud-config.js',
+  './inventory-utils.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png'
@@ -19,7 +20,8 @@ self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
     await cache.addAll(ASSETS);
-    await self.skipWaiting();
+    // При обновлении ждём нажатия кнопки «Обновить»; при первой установке активируем сразу.
+    if (!self.registration.active) await self.skipWaiting();
   })());
 });
 
