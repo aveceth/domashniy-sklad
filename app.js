@@ -1,3 +1,6 @@
+import {createCloudSync} from './cloud-sync.js';
+import {setupUpdates} from './pwa-updates.js';
+import {localDate,addDays,diffDays,money,fmtDate,amount} from './date-utils.js';
 import {openDB,all,put,remove,clear,replaceAll} from './db.js';
 import {estimateShelfLife} from './expiry-rules.js';
 import {cloudConfigured,signedIn,signIn,signUp,signOut,uploadBackup,downloadBackup,savePushSubscription,disablePushSubscription} from './cloud.js';
@@ -7,12 +10,6 @@ import {priorityDate,byPriorityDate,isDemoPurchase} from './inventory-utils.js';
 const LOC={fridge:{name:'Холодильник',emoji:'❄️'},freezer:{name:'Морозилка',emoji:'🧊'},pantry:{name:'Кухонный шкаф',emoji:'🫙'}};
 const CATS={dairy:['Молочные продукты','🥛'],vegetables:['Овощи','🥕'],fruit:['Фрукты','🍎'],greens:['Зелень','🥬'],meat:['Мясо и птица','🍗'],fish:['Рыба','🐟'],eggs:['Яйца','🥚'],grains:['Крупы и макароны','🌾'],canned:['Консервы','🥫'],prepared:['Готовые блюда','🍲'],other:['Другое','📦']};
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const localDate=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
-const addDays=(date,n)=>{const [y,m,d]=date.split('-').map(Number);const z=new Date(y,m-1,d+Number(n));return `${z.getFullYear()}-${String(z.getMonth()+1).padStart(2,'0')}-${String(z.getDate()).padStart(2,'0')}`};
-const diffDays=date=>{if(!date)return Infinity;const d=new Date(date+'T12:00:00');const now=new Date(localDate()+'T12:00:00');return Math.round((d-now)/86400000)};
-const money=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(n||0)+' ₽';
-const fmtDate=d=>d?new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'short',year:'numeric'}):'Не указана';
-const amount=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:3}).format(n||0);
 const uuid=()=>crypto.randomUUID?.() || Date.now()+'-'+Math.random().toString(36).slice(2);
 let products=[],events=[],shopping=[],page='dashboard',locationFilter='all',query='',statusFilter='all',sort='expiry',editing=null,photoData=null,deferredInstall=null;
 function toast(text){const t=document.createElement('div');t.className='toast';t.textContent=text;$('#toastRegion').append(t);setTimeout(()=>t.remove(),3400)}
@@ -40,56 +37,19 @@ function renderPurchases(){
 function renderShopping(){return `<div class="content-stack"><section class="section"><div class="section-head"><div><h2>Список покупок</h2><div class="section-sub">Отмечайте приобретённое и удаляйте ненужное</div></div><button data-act="addMissing" class="btn btn-light btn-sm">Добавить закончившееся</button></div><form id="shoppingForm" class="inline-add"><input id="shoppingName" placeholder="Что нужно купить?" maxlength="100" required><button class="btn btn-primary" type="submit">＋ Добавить</button></form><div style="margin-top:20px">${shopping.length?shopping.slice().sort((a,b)=>Number(a.done)-Number(b.done)||b.createdAt-a.createdAt).map(x=>`<div class="shopping-row ${x.done?'done':''}"><input class="shopping-check" type="checkbox" data-shop-id="${esc(x.id)}" ${x.done?'checked':''} aria-label="Куплено: ${esc(x.name)}"><div class="shopping-title">${esc(x.name)}</div><button class="icon-btn" data-act="removeShop" data-id="${esc(x.id)}" aria-label="Удалить из списка">×</button></div>`).join(''):empty('Список пуст','Добавьте продукты, которые планируете приобрести.')}</div></section></div>`}
 function renderSettings(){return `<div class="content-stack"><section class="section"><div class="section-head"><div><h2>Данные и резервное копирование</h2><div class="section-sub">Запасы сохраняются локально в этом браузере</div></div></div><div class="settings-list"><div class="settings-item"><div><strong>Экспорт данных</strong><p>Скачайте JSON со всеми партиями, расходами, списком покупок и фотографиями.</p></div><button data-act="export" class="btn btn-light">Скачать JSON</button></div><div class="settings-item"><div><strong>Восстановление из файла</strong><p>Импорт полностью заменяет текущие данные. Сначала сделайте резервную копию.</p></div><label class="btn btn-light" for="importFile">Импорт JSON</label><input id="importFile" class="import-file" type="file" accept="application/json,.json"></div><div class="settings-item cloud-settings"><div><strong>Облачные резервные копии (Supabase)</strong><p>${cloudConfigured()?(signedIn()?'Аккаунт подключён. Изменения основного устройства сохраняются автоматически после включения резервного копирования.':'Войдите, чтобы сохранить копию в облаке.'):'Чтобы включить, заполните файл cloud-config.js и выполните supabase.sql.'}</p>${cloudConfigured()&&signedIn()?`<p id="cloudSyncStatus" class="muted" style="margin-top:8px"></p>`:''}${cloudConfigured()&&!signedIn()?`<form id="cloudLoginForm" class="cloud-login"><input id="cloudEmail" type="email" autocomplete="email" placeholder="E-mail" required><input id="cloudPassword" type="password" autocomplete="current-password" placeholder="Пароль" minlength="6" required><div class="small-actions"><button class="btn btn-light" type="submit" data-mode="login">Войти</button><button class="btn btn-light" type="button" data-act="cloudSignup">Регистрация</button></div></form>`:''}</div>${cloudConfigured()&&signedIn()?`<div class="small-actions"><button data-act="cloudUpload" class="btn btn-light">Сохранить в облако</button><button data-act="cloudRestore" class="btn btn-light">Загрузить из облака</button><button data-act="cloudLogout" class="btn btn-light">Выйти</button></div>`:''}</div><div class="settings-item"><div><strong>Удалить все данные</strong><p>Необратимо удалит продукты, покупки и список с этого устройства.</p></div><button data-act="reset" class="btn btn-danger-outline">Очистить</button></div></div></section><section class="section"><h2>Диапазоны для старых продуктов</h2><p class="muted" style="margin-top:12px;line-height:1.7">У продуктов, созданных до версии 0.3, может сохраниться одна дата. Эта функция пересчитает только старые автоматически оценённые сроки, для которых найдено правило. Указанные вручную сроки останутся без изменений. Перед действием сделайте экспорт JSON.</p><div class="small-actions" style="margin-top:12px"><button class="btn btn-light" data-act="recalculateRanges">Пересчитать старые ориентиры</button></div></section><section class="section"><h2>Фоновые push-уведомления</h2><p class="muted" style="margin-top:12px;line-height:1.7">Каждый день в 09:00 по часовому поясу телефона: продукты, у которых до ранней границы ориентировочного срока или точной даты остался 1 день или меньше, включая просроченные. Не более одного уведомления в сутки на устройство.</p><div class="small-actions" style="margin-top:12px"><button data-act="pushEnable" class="btn btn-primary">Включить фоновые push</button><button data-act="pushDisable" class="btn btn-light">Отключить на этом телефоне</button></div><p class="muted" style="margin-top:8px">Нужны настроенный Supabase, вход в аккаунт, VAPID-ключи и облачная копия актуальных запасов. На iPhone открой приложение с экрана «Домой».</p></section><section class="section"><h2>Локальная проверка уведомлений</h2><p class="muted" style="margin-top:12px;line-height:1.7">При открытии приложения можно получать уведомления только о продуктах со сроком сегодня или завтра. Фоновые push работают через Supabase после включения подписки. Эта кнопка проверяет только показ уведомлений на устройстве.</p><div class="small-actions" style="margin-top:12px"><button class="btn btn-light" data-act="testNotify">Разрешить и проверить</button></div></section><section class="section"><h2>О сроках хранения</h2><p class="muted" style="line-height:1.8;margin-top:12px">Автоматические даты — приблизительные рекомендации, которые не гарантируют безопасность пищи. Срок на упаковке важнее расчёта. Учитывайте температуру, условия хранения и вскрытие. Продукты с истёкшим сроком «годен до» не следует употреблять. Индивидуальные диапазоны — ориентиры для планирования, а не доказательство безопасности продукта.</p></section><section class="section"><h2>Распознавание по фото</h2><p class="muted" style="line-height:1.8;margin-top:12px">В карточке можно сфотографировать упаковку, сохранить изображение и попытаться считать штрихкод, если браузер поддерживает BarcodeDetector. Найденный штрихкод проверяется в Open Food Facts. Полноценное распознавание по внешнему виду и чтение даты с этикетки требуют отдельного AI-сервиса и пока не подключены.</p></section></div>`}
 function render(){const labels={dashboard:['ОБЗОР','Всё под контролем','Ваши продукты и их свежесть — в одном месте.'],stock:['ЗАПАСЫ','Мои продукты','Всё, что хранится на вашей кухне.'],purchases:['РАСХОДЫ','История покупок','Контролируйте затраты и остатки.'],shopping:['СПИСОК','Что купить','Соберите список для следующего похода в магазин.'],settings:['НАСТРОЙКИ','Настройки','Управление данными и резервными копиями.']};const l=labels[page];$('#crumb').textContent=l[0];$('#pageTitle').textContent=l[1];$('#pageSubtitle').textContent=l[2];document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('#appContent').innerHTML=({dashboard:renderDashboard,stock:renderStock,purchases:renderPurchases,shopping:renderShopping,settings:renderSettings})[page]();updateCloudStatus();}
-let cloudSyncTimer=null,cloudSyncReady=false,cloudSyncBusy=false;
-let cloudSyncRevision=0,cloudSyncFailures=0;
-const CLOUD_DIRTY='pantry-cloud-dirty-v1';
-const CLOUD_LAST='pantry-last-cloud-sync';
-
-function updateCloudStatus() {
-  const element=$('#cloudSyncStatus');
-  if (!element) return;
-  const last=localStorage.getItem(CLOUD_LAST);
-  const pending=localStorage.getItem(CLOUD_DIRTY)==='1';
-  element.textContent = pending
-    ? 'Есть локальные изменения, ожидающие отправки в облако.'
-    : last ? 'Последнее сохранение в облако: '+new Date(last).toLocaleString('ru-RU')
-           : 'Облачное сохранение ещё не выполнено.';
-}
-function planCloudSync(delay=1200) {
-  clearTimeout(cloudSyncTimer);
-  if (!cloudSyncReady || !cloudConfigured() || !signedIn()) return;
-  cloudSyncTimer=setTimeout(()=>{void flushCloudSync()},delay);
-}
-function queueCloudSnapshot() {
-  // Отметка сохраняется и после перезапуска PWA или отключения интернета.
-  localStorage.setItem(CLOUD_DIRTY,'1');
-  cloudSyncRevision++;
-  updateCloudStatus();
-  planCloudSync();
-}
-async function flushCloudSync() {
-  if (!cloudSyncReady || !cloudConfigured() || !signedIn() || cloudSyncBusy ||
-      localStorage.getItem(CLOUD_DIRTY)!=='1') return;
-  if (navigator.onLine===false) {planCloudSync(30000);return;}
-  cloudSyncBusy=true;
-  const revision=cloudSyncRevision;
-  try {
-    await uploadBackup(await getSnapshot());
-    localStorage.setItem(CLOUD_LAST,new Date().toISOString());
-    cloudSyncFailures=0;
-    if (revision===cloudSyncRevision) localStorage.removeItem(CLOUD_DIRTY);
-  } catch(error) {
-    console.warn('Не удалось синхронизировать облачную копию:',error);
-    cloudSyncFailures++;
-    if(cloudSyncFailures===1)toast('Облако временно недоступно. Повторим сохранение автоматически.');
-  } finally {
-    cloudSyncBusy=false;
-    updateCloudStatus();
-    if(localStorage.getItem(CLOUD_DIRTY)==='1') {
-      planCloudSync(cloudSyncFailures===0?1200:Math.min(300000,5000*2**Math.min(cloudSyncFailures-1,6)));
-    }
-  }
-}
+const cloudSync = createCloudSync({
+  storage: localStorage,
+  online: () => navigator.onLine !== false,
+  configured: cloudConfigured,
+  authenticated: signedIn,
+  getSnapshot: () => getSnapshot(),
+  upload: uploadBackup,
+  status: message => { const node = $('#cloudSyncStatus'); if (node) node.textContent = message; },
+  notify: toast
+});
+const updateCloudStatus = () => cloudSync.renderStatus();
+const planCloudSync = delay => cloudSync.plan(delay);
+const queueCloudSnapshot = () => cloudSync.queue();
 async function refresh(){[products,events,shopping]=await Promise.all(['products','events','shopping'].map(all));render()}
 async function refreshAfterEdit(){await refresh();queueCloudSnapshot()}
 
@@ -121,25 +81,23 @@ async function changeQuantity(id,direction){const p=products.find(p=>p.id===id);
 async function finishProduct(id){const p=products.find(x=>x.id===id);if(!p)return;ask('Использовать полностью?',`Списать всю партию «${p.name}» (${amount(p.quantity)} ${p.unit})? История покупки сохранится.`,async()=>{await put('products',{...p,quantity:0,updatedAt:Date.now()});await refreshAfterEdit();toast('Партия списана')})}
 async function getSnapshot(){return {format:'home-pantry',version:1,exportedAt:new Date().toISOString(),products:await all('products'),events:await all('events'),shopping:await all('shopping'),settings:await all('settings')}}
 async function cloudLogin(mode){try{const email=$('#cloudEmail')?.value?.trim(),password=$('#cloudPassword')?.value;if(!email||!password){toast('Введите e-mail и пароль');return}if(mode==='register'){const result=await signUp(email,password);toast(result.access_token?'Аккаунт создан':'Проверьте почту для подтверждения регистрации');}else{await signIn(email,password);toast('Вход выполнен. Для push сначала нажмите «Сохранить в облако».')}render()}catch(e){toast('Облако: '+e.message)}}
-async function cloudUpload(){
- try {
-  // Перед ручной загрузкой отметим локальный снимок как требующий отправки.
-  if (cloudSyncBusy) {toast('Сохранение уже выполняется. Повторная отправка запланирована.');queueCloudSnapshot();return;}
-  await uploadBackup(await getSnapshot());
-  cloudSyncReady=true;
-  cloudSyncFailures=0;
-  localStorage.setItem('pantry-autosync-enabled','1');
-  localStorage.setItem(CLOUD_LAST,new Date().toISOString());
-  localStorage.removeItem(CLOUD_DIRTY);
-  updateCloudStatus();
-  toast('Облачная копия обновлена. Автосохранение включено');
- }catch(e){
-  localStorage.setItem(CLOUD_DIRTY,'1');
-  updateCloudStatus();
-  toast('Не удалось сохранить: '+e.message);
- }
+async function cloudUpload() {
+  try {
+    if (cloudSync.isBusy()) {
+      toast('Сохранение уже выполняется. Повторная отправка запланирована.');
+      queueCloudSnapshot();
+      return;
+    }
+    const revision = cloudSync.revision();
+    await uploadBackup(await getSnapshot());
+    cloudSync.markSaved(revision);
+    toast('Облачная копия обновлена. Автосохранение включено');
+  } catch (error) {
+    cloudSync.markFailed();
+    toast('Не удалось сохранить: ' + error.message);
+  }
 }
-async function cloudRestore(){try{const backup=await downloadBackup();if(!backup){toast('В облаке пока нет резервной копии');return}ask('Восстановить облачную копию?',`Данные этого устройства будут полностью заменены облачной копией от ${new Date(backup.updated_at).toLocaleString('ru-RU')}.`,async()=>{try{cloudSyncReady=false;clearTimeout(cloudSyncTimer);localStorage.removeItem(CLOUD_DIRTY);localStorage.removeItem('pantry-autosync-enabled');await replaceAll(backup.data);await refresh();toast('Облачная копия восстановлена. Нажмите «Сохранить в облако» для автоматической отправки изменений')}catch(e){toast('Ошибка восстановления: '+e.message)}})}catch(e){toast('Не удалось загрузить: '+e.message)}}
+async function cloudRestore(){try{const backup=await downloadBackup();if(!backup){toast('В облаке пока нет резервной копии');return}ask('Восстановить облачную копию?',`Данные этого устройства будут полностью заменены облачной копией от ${new Date(backup.updated_at).toLocaleString('ru-RU')}.`,async()=>{try{cloudSync.beforeRestore();await replaceAll(backup.data);await refresh();toast('Облачная копия восстановлена. Нажмите «Сохранить в облако» для автоматической отправки изменений')}catch(e){toast('Ошибка восстановления: '+e.message)}})}catch(e){toast('Не удалось загрузить: '+e.message)}}
 async function exportData(){const data=await getSnapshot();const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`domashniy-sklad-${localDate()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1200)}
 async function importData(file){let obj;try{obj=JSON.parse(await file.text());if(obj?.format!=='home-pantry'||obj.version!==1||!['products','events','shopping','settings'].every(k=>Array.isArray(obj[k])))throw Error('Неверный формат');if(obj.products.some(p=>!p.id||typeof p.name!=='string'||!Number.isFinite(Number(p.quantity))||!LOC[p.location]))throw Error('Некорректные продукты');}catch(err){toast('Ошибка файла: '+err.message);return}ask('Заменить все данные?','Текущие записи будут заменены данными из файла. Отменить действие нельзя.',async()=>{try{await replaceAll(obj);await refreshAfterEdit();toast('Данные восстановлены')}catch(e){toast('Ошибка импорта: '+e.message)}})}
 async function detectBarcode(file){if(!('BarcodeDetector' in window))return;try{const img=await createImageBitmap(file);const detector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e']});const codes=await detector.detect(img);img.close();if(!codes.length)return;$('#photoNotice').textContent=`Штрихкод ${codes[0].rawValue}. Ищем товар в Open Food Facts...`;const ctrl=new AbortController();const timer=setTimeout(()=>ctrl.abort(),6000);try{const response=await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(codes[0].rawValue)}.json?fields=product_name,product_name_ru`,{signal:ctrl.signal});clearTimeout(timer);if(!response.ok)throw Error('нет ответа');const data=await response.json();const n=data.product?.product_name_ru||data.product?.product_name;if(data.status===1&&n){if(!$('#productName').value.trim())$('#productName').value=n;$('#photoNotice').textContent=`Найден товар: ${n}. Проверьте название, срок и количество.`;}else $('#photoNotice').textContent='Штрихкод найден, но товара нет в каталоге. Введите название вручную.';}catch{$('#photoNotice').textContent='Не удалось получить данные по штрихкоду. Название можно ввести вручную.'}}catch{$('#photoNotice').textContent='Фото добавлено. Автоматическое считывание штрихкода не поддерживается для этого файла.'}}
@@ -179,22 +137,12 @@ async function markLegacyDemoPurchases() {
   }
 }
 async function seedIfEmpty(){const settings=await all('settings');if(settings.some(s=>s.key==='initialized'))return;await put('settings',{key:'initialized',value:true});const today=localDate();const samples=[['Молоко 2,5%','dairy','fridge',2,'шт',4,190],['Йогурт натуральный','dairy','fridge',3,'шт',1,165],['Огурцы','vegetables','fridge',500,'г',2,95],['Куриное филе','meat','freezer',1.2,'кг',70,480],['Рис','grains','pantry',1,'кг',140,130],['Помидоры','vegetables','fridge',400,'г',5,110],['Гречка','grains','pantry',1,'кг',180,135]];for(const [name,category,location,quantity,unit,days,price] of samples){const p={id:uuid(),name,category,location,quantity,unit,purchaseDate:today,expiryDate:addDays(today,days),isEstimated:true,unitPrice:price/quantity,photo:null,createdAt:Date.now(),updatedAt:Date.now(),isDemo:true};await put('products',p);await logEvent('purchase',p,price)}await put('settings',{key:'demo',value:true})}
-function bind(){document.addEventListener('click',async e=>{const nav=e.target.closest('[data-page]');if(nav){navigate(nav.dataset.page);return}const btn=e.target.closest('[data-act]');if(!btn)return;const act=btn.dataset.act,id=btn.dataset.id;if(act==='new')openProduct();if(act==='all')navigate('stock');if(act==='purchases')navigate('purchases');if(act==='month'){selectedMonth=btn.dataset.month;render();}if(act==='location'){page='stock';locationFilter=btn.dataset.location;query='';statusFilter='all';render()};if(act==='filter'){locationFilter=btn.dataset.location;render()};if(act==='edit')openProduct(id);if(act==='finish')await finishProduct(id);if(act==='plus'||act==='minus')await changeQuantity(id,act==='plus'?1:-1);if(act==='export')await exportData();if(act==='recalculateRanges')recalculateOldRanges();if(act==='testNotify'){await testNotification();await notifyUrgentOnOpen()};if(act==='pushEnable')await enablePush();if(act==='pushDisable')await disablePush();if(act==='cloudSignup')await cloudLogin('register');if(act==='cloudLogout'){cloudSyncReady=false;clearTimeout(cloudSyncTimer);localStorage.removeItem('pantry-autosync-enabled');signOut();render();toast('Вы вышли из аккаунта');}if(act==='cloudUpload')await cloudUpload();if(act==='cloudRestore')await cloudRestore();if(act==='reset')ask('Удалить все данные?','Все записи, фотографии, история покупок и список будут удалены без возможности восстановления.',async()=>{await Promise.all(['products','events','shopping','settings'].map(clear));await put('settings',{key:'initialized',value:true});await refreshAfterEdit();toast('Все данные удалены')});if(act==='addMissing')await missingToShopping();if(act==='removeShop'){await remove('shopping',id);await refreshAfterEdit()}});
+function bind(){document.addEventListener('click',async e=>{const nav=e.target.closest('[data-page]');if(nav){navigate(nav.dataset.page);return}const btn=e.target.closest('[data-act]');if(!btn)return;const act=btn.dataset.act,id=btn.dataset.id;if(act==='new')openProduct();if(act==='all')navigate('stock');if(act==='purchases')navigate('purchases');if(act==='month'){selectedMonth=btn.dataset.month;render();}if(act==='location'){page='stock';locationFilter=btn.dataset.location;query='';statusFilter='all';render()};if(act==='filter'){locationFilter=btn.dataset.location;render()};if(act==='edit')openProduct(id);if(act==='finish')await finishProduct(id);if(act==='plus'||act==='minus')await changeQuantity(id,act==='plus'?1:-1);if(act==='export')await exportData();if(act==='recalculateRanges')recalculateOldRanges();if(act==='testNotify'){await testNotification();await notifyUrgentOnOpen()};if(act==='pushEnable')await enablePush();if(act==='pushDisable')await disablePush();if(act==='cloudSignup')await cloudLogin('register');if(act==='cloudLogout'){cloudSync.stop();signOut();render();toast('Вы вышли из аккаунта');}if(act==='cloudUpload')await cloudUpload();if(act==='cloudRestore')await cloudRestore();if(act==='reset')ask('Удалить все данные?','Все записи, фотографии, история покупок и список будут удалены без возможности восстановления.',async()=>{await Promise.all(['products','events','shopping','settings'].map(clear));await put('settings',{key:'initialized',value:true});await refreshAfterEdit();toast('Все данные удалены')});if(act==='addMissing')await missingToShopping();if(act==='removeShop'){await remove('shopping',id);await refreshAfterEdit()}});
   document.addEventListener('input',e=>{if(e.target.id==='searchInput'){query=e.target.value;const el=$('#stockResults'),shown=visibleProducts();if(el)el.innerHTML=shown.length?shown.map(card).join(''):empty('Ничего не найдено','Измените запрос или фильтры.',true)}});
   document.addEventListener('change',async e=>{if(e.target.id==='statusSelect'){statusFilter=e.target.value;render()}if(e.target.id==='sortSelect'){sort=e.target.value;render()}if(e.target.matches('[data-shop-id]')){const item=shopping.find(x=>x.id===e.target.dataset.shopId);if(item){await put('shopping',{...item,done:e.target.checked});await refreshAfterEdit()}}if(e.target.id==='importFile'){const file=e.target.files?.[0];if(file)await importData(file);e.target.value=''}});
   document.addEventListener('submit',async e=>{if(e.target.id==='cloudLoginForm'){e.preventDefault();await cloudLogin('login');}if(e.target.id==='shoppingForm'){e.preventDefault();const input=$('#shoppingName'),name=input.value.trim();if(!name)return;await put('shopping',{id:uuid(),name,done:false,createdAt:Date.now()});await refreshAfterEdit();toast('Добавлено в список')}});
   $('#addBtn').addEventListener('click',()=>openProduct());$('#closeDialog').addEventListener('click',closeProduct);$('#cancelProduct').addEventListener('click',closeProduct);$('#productForm').addEventListener('submit',saveProduct);$('#productLocation').addEventListener('change',updateHint);$('#productOpenedDate').addEventListener('change',updateHint);$('#productPurchaseDate').addEventListener('change',updateHint);$('#autoExpiry').addEventListener('change',updateHint);$('#productCategory').addEventListener('change',updateHint);$('#productName').addEventListener('input',updateHint);$('#productName').addEventListener('change',fillFromPrevious);$('#saveAndAdd').addEventListener('click',()=>{keepAdding=true});$('#saveOnly').addEventListener('click',()=>{keepAdding=false});$('#scanBtn').addEventListener('click',startScanner);$('#stopScanner').addEventListener('click',stopScanner);$('#scannerDialog').addEventListener('close',stopScanner);$('#productPhoto').addEventListener('change',e=>handlePhoto(e.target.files?.[0]));$('#photoPreview').addEventListener('click',e=>{if(e.target.id==='removePhoto'){photoData=null;showPhoto()}});$('#deleteProduct').addEventListener('click',()=>{const id=editing;closeProduct();ask('Удалить эту партию?','Карточка продукта будет удалена. История покупки останется для отчётов.',async()=>{await remove('products',id);await refreshAfterEdit();toast('Партия удалена')})});$('#confirmNo').onclick=()=>$('#confirmDialog').close();
   window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;$('#installBtn').classList.remove('hidden')});$('#installBtn').addEventListener('click',async()=>{if(!deferredInstall)return;deferredInstall.prompt();await deferredInstall.userChoice;deferredInstall=null;$('#installBtn').classList.add('hidden')});window.addEventListener('appinstalled',()=>toast('Приложение установлено'));
-}
-function setupUpdates(){navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(reg=>{
- const promptUpdate=()=>{$('#updateBanner').classList.remove('hidden')};
- if(reg.waiting&&navigator.serviceWorker.controller)promptUpdate();
- reg.addEventListener('updatefound',()=>{const worker=reg.installing;worker?.addEventListener('statechange',()=>{if(worker.state==='installed'&&navigator.serviceWorker.controller)promptUpdate()})});
- $('#applyUpdate').addEventListener('click',()=>{if(reg.waiting)reg.waiting.postMessage({type:'SKIP_WAITING'});else location.reload()});
- const interval=setInterval(()=>{if(document.visibilityState==='visible')reg.update().catch(()=>{})},60*1000);
- window.addEventListener('pagehide',()=>clearInterval(interval),{once:true});reg.update().catch(()=>{});
- }).catch(err=>console.warn('PWA update failed',err));
- let reloading=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!reloading){reloading=true;location.reload()}});
 }
 async function notifyUrgentOnOpen(){
  if(!('Notification'in window)||Notification.permission!=='granted'||!navigator.serviceWorker)return;
@@ -211,7 +159,7 @@ async function enablePush(){
   if(!cloudConfigured()||!signedIn())throw Error('Сначала настройте Supabase и войдите в аккаунт');
   if(!VAPID_PUBLIC_KEY)throw Error('Добавьте VAPID_PUBLIC_KEY в cloud-config.js');
   if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window))throw Error('Web Push не поддерживается здесь. На iPhone откройте установленное приложение с главного экрана.');
-  if(!cloudSyncReady)throw Error('Сначала нажмите «Сохранить в облако», чтобы сервер видел актуальные продукты');
+  if(!cloudSync.isEnabled())throw Error('Сначала нажмите «Сохранить в облако», чтобы сервер видел актуальные продукты');
   const permission=await Notification.requestPermission();
   if(permission!=='granted')throw Error('Телефон не разрешил уведомления');
   const reg=await navigator.serviceWorker.ready;
@@ -231,5 +179,5 @@ async function disablePush(){try{
  }catch(e){toast('Ошибка отключения: '+e.message)}
 }
 async function testNotification(){if(!('Notification'in window)){toast('Уведомления недоступны в этом браузере');return}let permission=Notification.permission;if(permission==='default')permission=await Notification.requestPermission();if(permission!=='granted'){toast('Разрешение на уведомления не получено');return}const registration=await navigator.serviceWorker?.ready;if(registration){await registration.showNotification('Домашний склад — проверка',{body:'Локальный показ уведомлений работает. Серверные push проверяются отдельно.',icon:'./icons/icon-192.png',tag:'pantry-test'})}else toast('Service Worker не зарегистрирован')}
-async function start(){try{await openDB();bind();await seedIfEmpty();await markLegacyDemoPurchases();cloudSyncReady=localStorage.getItem('pantry-autosync-enabled')==='1'&&signedIn();await refresh();if(localStorage.getItem(CLOUD_DIRTY)==='1')planCloudSync(1500);window.addEventListener('online',()=>planCloudSync(250));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')planCloudSync(250)});void notifyUrgentOnOpen();if('serviceWorker' in navigator&&location.protocol!=='file:')setupUpdates();if((await all('settings')).some(s=>s.key==='demo'))toast('Добавлены демонстрационные продукты. Их можно изменить или удалить.')}catch(err){console.error(err);$('#appContent').innerHTML=`<section class="section"><h2>Не удалось открыть хранилище</h2><p class="muted" style="margin-top:12px">Попробуйте обычное окно браузера (не приватное) и разрешите хранение данных. Ошибка: ${esc(err.message)}</p></section>`}}
+async function start(){try{await openDB();bind();await seedIfEmpty();await markLegacyDemoPurchases();cloudSync.start();await refresh();window.addEventListener('online',()=>planCloudSync(250));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')planCloudSync(250)});void notifyUrgentOnOpen();if('serviceWorker' in navigator&&location.protocol!=='file:')setupUpdates();if((await all('settings')).some(s=>s.key==='demo'))toast('Добавлены демонстрационные продукты. Их можно изменить или удалить.')}catch(err){console.error(err);$('#appContent').innerHTML=`<section class="section"><h2>Не удалось открыть хранилище</h2><p class="muted" style="margin-top:12px">Попробуйте обычное окно браузера (не приватное) и разрешите хранение данных. Ошибка: ${esc(err.message)}</p></section>`}}
 start();

@@ -1,4 +1,4 @@
-const CACHE = 'home-pantry-static-v041';
+const CACHE = 'home-pantry-static-v050';
 
 const ASSETS = [
   './',
@@ -10,6 +10,9 @@ const ASSETS = [
   './cloud.js',
   './cloud-config.js',
   './inventory-utils.js',
+  './date-utils.js',
+  './pwa-updates.js',
+  './cloud-sync.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png'
